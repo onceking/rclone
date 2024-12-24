@@ -178,13 +178,13 @@ E.g. if shared folders can be found in directories representing volumes:
 E.g. if home directory can be found in a shared folder called "home":
 
     rclone sync /home/local/directory remote:/home/directory --sftp-path-override /volume1/homes/USER/directory
-	
+
 To specify only the path to the SFTP remote's root, and allow rclone to add any relative subpaths automatically (including unwrapping/decrypting remotes as necessary), add the '@' character to the beginning of the path.
 
 E.g. the first example above could be rewritten as:
 
 	rclone sync /home/local/directory remote:/directory --sftp-path-override @/volume2
-	
+
 Note that when using this method with Synology "home" folders, the full "/homes/USER" path should be specified instead of "/home".
 
 E.g. the second example above should be rewritten as:
@@ -217,6 +217,11 @@ E.g. the second example above should be rewritten as:
 				},
 			},
 		}, {
+			Name:     "df_command",
+			Default:  "df",
+			Help:     "The command used to read read disk free .",
+			Advanced: true,
+		}, {
 			Name:     "md5sum_command",
 			Default:  "",
 			Help:     "The command used to read md5 hashes.\n\nLeave blank for autodetect.",
@@ -243,7 +248,7 @@ E.g. the second example above should be rewritten as:
 
 The subsystem option is ignored when server_command is defined.
 
-If adding server_command to the configuration file please note that 
+If adding server_command to the configuration file please note that
 it should not be enclosed in quotes, since that will make rclone fail.
 
 A working example is:
@@ -469,7 +474,7 @@ connection for every hash it calculates.
 			Name:    "socks_proxy",
 			Default: "",
 			Help: `Socks 5 proxy host.
-	
+
 Supports the format user:pass@host:port, user@host:port, host:port.
 
 Example:
@@ -520,6 +525,7 @@ type Options struct {
 	PathOverride            string          `config:"path_override"`
 	SetModTime              bool            `config:"set_modtime"`
 	ShellType               string          `config:"shell_type"`
+	DfCommand               string          `config:"df_command"`
 	Md5sumCommand           string          `config:"md5sum_command"`
 	Sha1sumCommand          string          `config:"sha1sum_command"`
 	SkipLinks               bool            `config:"skip_links"`
@@ -1700,38 +1706,38 @@ func (f *Fs) Hashes() hash.Set {
 func (f *Fs) About(ctx context.Context) (*fs.Usage, error) {
 	// If server implements the vendor-specific VFS statistics extension prefer that
 	// (OpenSSH implements it on using syscall.Statfs on Linux and API function GetDiskFreeSpace on Windows)
-	c, err := f.getSftpConnection(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var vfsStats *sftp.StatVFS
-	if _, found := c.sftpClient.HasExtension("statvfs@openssh.com"); found {
-		fs.Debugf(f, "Server has VFS statistics extension")
-		aboutPath := f.absRoot
-		if aboutPath == "" {
-			aboutPath = "/"
-		}
-		fs.Debugf(f, "About path %q", aboutPath)
-		vfsStats, err = c.sftpClient.StatVFS(aboutPath)
-	}
-	f.putSftpConnection(&c, err) // Return to pool asap, if running shell command below it will be reused
-	if vfsStats != nil {
-		total := vfsStats.TotalSpace()
-		free := vfsStats.FreeSpace()
-		used := total - free
-		return &fs.Usage{
-			Total: fs.NewUsageValue(int64(total)),
-			Used:  fs.NewUsageValue(int64(used)),
-			Free:  fs.NewUsageValue(int64(free)),
-		}, nil
-	} else if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, err
-		}
-		fs.Debugf(f, "Failed to retrieve VFS statistics, trying shell command instead: %v", err)
-	} else {
-		fs.Debugf(f, "Server does not have the VFS statistics extension, trying shell command instead")
-	}
+	// c, err := f.getSftpConnection(ctx)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// var vfsStats *sftp.StatVFS
+	// if _, found := c.sftpClient.HasExtension("statvfs@openssh.com"); found {
+	// 	fs.Debugf(f, "Server has VFS statistics extension")
+	// 	aboutPath := f.absRoot
+	// 	if aboutPath == "" {
+	// 		aboutPath = "/"
+	// 	}
+	// 	fs.Debugf(f, "About path %q", aboutPath)
+	// 	vfsStats, err = c.sftpClient.StatVFS(aboutPath)
+	// }
+	// f.putSftpConnection(&c, err) // Return to pool asap, if running shell command below it will be reused
+	// if vfsStats != nil {
+	// 	total := vfsStats.TotalSpace()
+	// 	free := vfsStats.FreeSpace()
+	// 	used := total - free
+	// 	return &fs.Usage{
+	// 		Total: fs.NewUsageValue(int64(total)),
+	// 		Used:  fs.NewUsageValue(int64(used)),
+	// 		Free:  fs.NewUsageValue(int64(free)),
+	// 	}, nil
+	// } else if err != nil {
+	// 	if errors.Is(err, os.ErrNotExist) {
+	// 		return nil, err
+	// 	}
+	// 	fs.Debugf(f, "Failed to retrieve VFS statistics, trying shell command instead: %v", err)
+	// } else {
+	// 	fs.Debugf(f, "Server does not have the VFS statistics extension, trying shell command instead")
+	// }
 
 	// Fall back to shell command method if possible
 	if f.shellType == shellTypeNotSupported || f.shellType == "cmd" {
@@ -1774,7 +1780,7 @@ func (f *Fs) About(ctx context.Context) (*fs.Usage, error) {
 		return usage, nil
 	}
 	// Unix/default shell
-	shellCmd := "df -k " + aboutShellPathArg
+	shellCmd := f.opt.DfCommand + " -k " + aboutShellPathArg
 	fs.Debugf(f, "About using shell command for shell type %q", f.shellType)
 	stdout, err := f.run(ctx, shellCmd)
 	if err != nil {
